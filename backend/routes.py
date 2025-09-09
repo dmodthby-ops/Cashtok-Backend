@@ -195,26 +195,44 @@ async def create_lead(
     request: Request,
     db: AsyncIOMotorDatabase = Depends(get_database)
 ):
-    """Create new lead"""
-    service = LeadService(db)
-    
+    """Create new lead AND subscribe to newsletter"""
+    lead_service = LeadService(db)
+    email_service = EmailService(db)
+    analytics_service = AnalyticsService(db)
+
+    # Create lead
     lead_dict = Lead(**lead.dict()).dict()
     lead_dict["ip_address"] = request.client.host
-    
-    result = await service.create_lead(lead_dict)
-    
+    new_lead = await lead_service.create_lead(lead_dict)
+
+    # Subscribe to newsletter (2 en 1)
+    subscriber_dict = {
+        "email": lead.email,
+        "source": lead.source,
+        "interests": lead.interests,
+        "ip_address": request.client.host
+    }
+    try:
+        await email_service.subscribe(subscriber_dict)
+    except Exception as e:
+        print(f"Newsletter subscription failed for {lead.email}: {e}")
+
     # Track analytics
-    analytics_service = AnalyticsService(db)
     await analytics_service.track_event({
         "id": str(uuid.uuid4()),
         "event_type": "lead_created",
         "page": "/",
         "ip_address": request.client.host,
         "timestamp": datetime.utcnow(),
-        "additional_data": {"lead_source": lead.source, "interest_level": lead.interest_level}
+        "additional_data": {
+            "lead_source": lead.source,
+            "interest_level": lead.interest_level,
+            "email": lead.email
+        }
     })
-    
-    return result
+
+    return new_lead
+
 
 @router.get("/leads", response_model=List[Lead])
 async def get_leads(db: AsyncIOMotorDatabase = Depends(get_database)):

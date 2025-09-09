@@ -113,6 +113,7 @@ class Lead(BaseModel):
     name: Optional[str] = None
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
+    interests: List[str] = []  # <-- ajouté
     interest_level: str = "low"  # low, medium, high
     source: str = "website"
     notes: str = ""
@@ -124,9 +125,11 @@ class LeadCreate(BaseModel):
     name: Optional[str] = None
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
+    interests: List[str] = []  # <-- ajouté
     interest_level: str = "medium"
     source: str = "website"
     notes: str = ""
+
 
 # Newsletter Campaign Models  
 class NewsletterCampaign(BaseModel):
