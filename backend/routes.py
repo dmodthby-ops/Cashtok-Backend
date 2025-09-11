@@ -97,6 +97,35 @@ async def get_email_stats(db: AsyncIOMotorDatabase = Depends(get_database)):
     stats = await service.get_stats()
     return stats
 
+# Confirmer l'email du subscriber
+@router.get("/emails/confirm/{token}", response_model=EmailSubscriber)
+async def confirm_email(token: str, db: AsyncIOMotorDatabase = Depends(get_database)):
+    """
+    Confirme l'inscription à la newsletter via token.
+    """
+    email_service = EmailService(db)
+    subscriber = await email_service.confirm_subscriber(token)
+    
+    if not subscriber:
+        raise HTTPException(status_code=404, detail="Token invalide ou expiré")
+    
+    # Optionnel : track analytics confirmation
+    analytics_service = AnalyticsService(db)
+    await analytics_service.track_event({
+        "id": str(uuid.uuid4()),
+        "event_type": "email_confirmed",
+        "page": "/emails/confirm",
+        "ip_address": "server",  # ou récupérer IP si besoin
+        "timestamp": datetime.utcnow(),
+        "additional_data": {
+            "email": subscriber.email,
+            "source": subscriber.source,
+            "interests": subscriber.interests
+        }
+    })
+
+    return subscriber
+
 # Analytics Routes
 @router.post("/analytics/track", response_model=AnalyticsEvent)
 async def track_event(
