@@ -59,13 +59,17 @@ class EmailService:
                         "is_active": True,
                         "subscribed_at": datetime.utcnow(),
                         "source": subscriber_data.get("source", "unknown"),
-                        "interests": subscriber_data.get("interests", [])
+                        "interests": subscriber_data.get("interests", []),
+                        "confirmed": False,
+                        "token": str(uuid.uuid4()) # <-- MODIF: regen token si déjà inscrit
                     }
                 }
             )
             return await self.collection.find_one({"email": subscriber_data["email"]})
         else:
             # Create new subscription
+            subscriber_data["confirmed"] = False # <-- MODIF
+            subscriber_data["token"] = str(uuid.uuid4()) # <-- MODIF
             result = await self.collection.insert_one(subscriber_data)
             return await self.collection.find_one({"_id": result.inserted_id})
 
@@ -75,6 +79,18 @@ class EmailService:
             {"is_active": True}
         ).sort("subscribed_at", -1).to_list(10000)
         return subscribers
+    
+    async def confirm_subscriber(self, token: str) -> Optional[dict]:
+        """Confirme un subscriber via son token"""
+        subscriber = await self.collection.find_one({"token": token})
+        if not subscriber:
+            return None
+
+        await self.collection.update_one(
+            {"token": token},
+            {"$set": {"confirmed": True, "token": None}} # <-- MODIF: token consommé
+        )
+        return await self.collection.find_one({"email": subscriber["email"]})
 
     async def get_stats(self) -> dict:
         """Get email subscription stats"""

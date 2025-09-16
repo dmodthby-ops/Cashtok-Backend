@@ -229,24 +229,29 @@ async def create_lead(
     email_service = EmailService(db)
     analytics_service = AnalyticsService(db)
 
-    # Create lead
+
+
+    # Lead → DB
     lead_dict = Lead(**lead.dict()).dict()
     lead_dict["ip_address"] = request.client.host
     new_lead = await lead_service.create_lead(lead_dict)
 
-    # Subscribe to newsletter (2 en 1)
-    subscriber_dict = {
-        "email": lead.email,
-        "source": lead.source,
-        "interests": lead.interests,
-        "ip_address": request.client.host
-    }
-    try:
-        await email_service.subscribe(subscriber_dict)
-    except Exception as e:
-        print(f"Newsletter subscription failed for {lead.email}: {e}")
 
-    # Track analytics
+    # Newsletter → DB (2 en 1)
+    if lead.email:
+        subscriber_dict = {
+            "email": lead.email,
+            "source": lead.source,
+            "interests": lead.interests,
+            "ip_address": request.client.host
+        }
+        try:
+            await email_service.subscribe(subscriber_dict)
+        except Exception as e:
+            print(f"Newsletter subscription failed for {lead.email}: {e}")
+
+
+    # Analytics → DB
     await analytics_service.track_event({
         "id": str(uuid.uuid4()),
         "event_type": "lead_created",
@@ -261,6 +266,34 @@ async def create_lead(
     })
 
     return new_lead
+
+@router.get("/emails/confirm/{token}", response_model=EmailSubscriber)
+async def confirm_email(token: str, db: AsyncIOMotorDatabase = Depends(get_database)):
+    """Confirme l'inscription à la newsletter via token."""
+    email_service = EmailService(db)
+    subscriber = await email_service.confirm_subscriber(token)
+
+
+    if not subscriber:
+        raise HTTPException(status_code=404, detail="Token invalide ou expiré")
+
+
+    # Analytics
+    analytics_service = AnalyticsService(db)
+    await analytics_service.track_event({
+        "id": str(uuid.uuid4()),
+        "event_type": "email_confirmed",
+        "page": "/emails/confirm",
+        "ip_address": "server",
+        "timestamp": datetime.utcnow(),
+        "additional_data": {
+            "email": subscriber["email"],
+            "source": subscriber["source"],
+            "interests": subscriber.get("interests", [])
+        }
+    })
+
+    return subscriber
 
 
 @router.get("/leads", response_model=List[Lead])

@@ -46,11 +46,13 @@ class EmailSubscriber(BaseModel):
     subscribed_at: datetime = Field(default_factory=datetime.utcnow)
     is_active: bool = True
     confirmed: bool = False
+    token: Optional[str] = None # <-- MODIF: ajouté pour confirmation
 
 class EmailSubscriberCreate(BaseModel):
     email: EmailStr
     source: str = "unknown"
     interests: List[str] = []
+# Lead déjà adapté avec interests & interest_level (ok)
 
 # Analytics Models
 class AnalyticsEvent(BaseModel):
