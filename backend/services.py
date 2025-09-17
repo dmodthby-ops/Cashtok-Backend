@@ -9,7 +9,7 @@ import json
 from collections import defaultdict, Counter
 
 SYSTEME_IO_API_KEY = os.getenv("SYSTEME_IO_API_KEY")
-SYSTEME_IO_BASE_URL = "https://api.systeme.io/v1"   # <-- obligatoire, ajout du /v1
+SYSTEME_IO_BASE_URL = "https://api.systeme.io/"   # <-- obligatoire, ajout du /v1, ensuite supprimer
 
 class SystemeIOService:
     def __init__(self):
