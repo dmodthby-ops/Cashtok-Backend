@@ -8,9 +8,8 @@ from datetime import datetime, timedelta
 import json
 from collections import defaultdict, Counter
 
-
 SYSTEME_IO_API_KEY = os.getenv("SYSTEME_IO_API_KEY")
-SYSTEME_IO_BASE_URL = "https://api.systeme.io"
+SYSTEME_IO_BASE_URL = "https://api.systeme.io/v1"   # <-- obligatoire, ajout du /v1
 
 class SystemeIOService:
     def __init__(self):
@@ -19,14 +18,16 @@ class SystemeIOService:
 
     async def _post(self, endpoint: str, payload: dict):
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "X-API-Key": self.api_key,        # <-- corrigé
             "Content-Type": "application/json"
         }
         async with aiohttp.ClientSession() as session:
             async with session.post(f"{self.base_url}{endpoint}", json=payload, headers=headers) as response:
+                body = await response.text()
                 if response.status not in [200, 201]:
-                    body = await response.text()
-                    print(f"Systeme.io API Error {response.status}: {body}")
+                    print(f"❌ Systeme.io API Error {response.status}: {body}")
+                    return None
+                print(f"✅ Systeme.io Response {response.status}: {body}")
                 return await response.json()
 
     async def create_contact(self, email: str, first_name: str = None, tags: list = None):
