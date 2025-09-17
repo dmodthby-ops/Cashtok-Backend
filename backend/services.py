@@ -1,10 +1,46 @@
 import asyncio
 import uuid
+import aiohttp
+import os
 from typing import List, Dict, Optional
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from datetime import datetime, timedelta
 import json
 from collections import defaultdict, Counter
+
+
+SYSTEME_IO_API_KEY = os.getenv("SYSTEME_IO_API_KEY")
+SYSTEME_IO_BASE_URL = "https://api.systeme.io"
+
+class SystemeIOService:
+    def __init__(self):
+        self.base_url = SYSTEME_IO_BASE_URL
+        self.api_key = SYSTEME_IO_API_KEY
+
+    async def _post(self, endpoint: str, payload: dict):
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.post(f"{self.base_url}{endpoint}", json=payload, headers=headers) as response:
+                if response.status not in [200, 201]:
+                    body = await response.text()
+                    print(f"Systeme.io API Error {response.status}: {body}")
+                return await response.json()
+
+    async def create_contact(self, email: str, first_name: str = None, tags: list = None):
+        payload = {"email": email}
+        if first_name:
+            payload["first_name"] = first_name
+        if tags:
+            payload["tags"] = tags
+        return await self._post("/contacts", payload)
+
+    async def trigger_event(self, contact_id: str, event_name: str, data: dict = None):
+        payload = {"contact_id": contact_id, "event_name": event_name, "data": data or {}}
+        return await self._post("/events", payload)
+
 
 class TestimonialService:
     def __init__(self, db: AsyncIOMotorDatabase):
@@ -40,10 +76,12 @@ class FAQService:
         result = await self.collection.insert_one(faq_data)
         return await self.collection.find_one({"_id": result.inserted_id})
 
+# --- Dans services.py ---
 class EmailService:
     def __init__(self, db: AsyncIOMotorDatabase):
         self.db = db
         self.collection = db.email_subscribers
+        self.systeme_io = SystemeIOService()   # <--- AJOUT
 
     async def subscribe(self, subscriber_data: dict) -> dict:
         """Subscribe user to newsletter"""
@@ -61,17 +99,29 @@ class EmailService:
                         "source": subscriber_data.get("source", "unknown"),
                         "interests": subscriber_data.get("interests", []),
                         "confirmed": False,
-                        "token": str(uuid.uuid4()) # <-- MODIF: regen token si déjà inscrit
+                        "token": str(uuid.uuid4())  # <-- regen token si déjà inscrit
                     }
                 }
             )
-            return await self.collection.find_one({"email": subscriber_data["email"]})
+            new_subscriber = await self.collection.find_one({"email": subscriber_data["email"]})
         else:
             # Create new subscription
-            subscriber_data["confirmed"] = False # <-- MODIF
-            subscriber_data["token"] = str(uuid.uuid4()) # <-- MODIF
+            subscriber_data["confirmed"] = False
+            subscriber_data["token"] = str(uuid.uuid4())
             result = await self.collection.insert_one(subscriber_data)
-            return await self.collection.find_one({"_id": result.inserted_id})
+            new_subscriber = await self.collection.find_one({"_id": result.inserted_id})
+
+        # --- Sync Systeme.io (NOUVEAU) ---
+        try:
+            await self.systeme_io.create_contact(
+                email=new_subscriber["email"],
+                first_name=new_subscriber.get("first_name"),
+                tags=[new_subscriber.get("source", "newsletter")]
+            )
+        except Exception as e:
+            print(f"[WARN] Systeme.io sync failed for subscriber {new_subscriber['email']}: {e}")
+
+        return new_subscriber
 
     async def get_all_active(self) -> List[dict]:
         """Get all active subscribers"""
@@ -236,28 +286,42 @@ class LeadService:
     def __init__(self, db: AsyncIOMotorDatabase):
         self.db = db
         self.collection = db.leads
+        self.systeme_io = SystemeIOService()   # <--- AJOUT
 
     async def create_lead(self, lead_data: dict) -> dict:
         """Create new lead"""
         # Check if lead already exists by email
+        # --- Sauvegarde MongoDB ---
         if lead_data.get("email"):
             existing = await self.collection.find_one({"email": lead_data["email"]})
-            if existing:
+            if existing: 
                 # Update existing lead
                 await self.collection.update_one(
                     {"email": lead_data["email"]},
-                    {
-                        "$set": {
-                            **lead_data,
-                            "updated_at": datetime.utcnow()
-                        }
-                    }
+                    {"$set": {**lead_data, "updated_at": datetime.utcnow()}}
                 )
-                return await self.collection.find_one({"email": lead_data["email"]})
-        
-        # Create new lead
-        result = await self.collection.insert_one(lead_data)
-        return await self.collection.find_one({"_id": result.inserted_id})
+                lead = await self.collection.find_one({"email": lead_data["email"]})
+            else:
+                result = await self.collection.insert_one(lead_data)
+                lead = await self.collection.find_one({"_id": result.inserted_id})
+        else: 
+            # Create new lead
+            result = await self.collection.insert_one(lead_data)
+            lead = await self.collection.find_one({"_id": result.inserted_id})
+
+        # --- Sync Systeme.io (NOUVEAU) ---
+        try:
+            if lead.get("email"):
+                tags = [lead.get("interest_level", "new"), lead.get("source", "website")]
+                await self.systeme_io.create_contact(
+                    email=lead["email"],
+                    first_name=lead.get("name"),
+                    tags=tags
+                )
+        except Exception as e:
+            print(f"[WARN] Systeme.io sync failed for lead {lead.get('email')}: {e}")
+
+        return lead
 
     async def get_all_leads(self) -> List[dict]:
         """Get all leads"""
